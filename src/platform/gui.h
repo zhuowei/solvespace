@@ -42,6 +42,34 @@ struct KeyboardEvent {
 
 std::string AcceleratorDescription(const KeyboardEvent &accel);
 
+// A mouse input event.
+class MouseEvent {
+public:
+    enum class Type {
+        MOTION,
+        PRESS,
+        DBL_PRESS,
+        RELEASE,
+        SCROLL_VERT,
+        LEAVE,
+    };
+
+    enum class Button {
+        NONE,
+        LEFT,
+        MIDDLE,
+        RIGHT,
+    };
+
+    Type        type;
+    double      x;
+    double      y;
+    Button      button;
+    bool        shiftDown;
+    bool        controlDown;
+    int         scrollDelta;
+};
+
 //-----------------------------------------------------------------------------
 // Interfaces
 //-----------------------------------------------------------------------------
@@ -104,10 +132,74 @@ public:
     virtual std::shared_ptr<Menu> AddSubMenu(const std::string &label) = 0;
 
     virtual void Clear() = 0;
-    virtual void *NativePtr() = 0;
 };
 
 typedef std::shared_ptr<MenuBar> MenuBarRef;
+
+// A native top-level window, with an OpenGL context, and an editor overlay.
+class Window {
+public:
+    enum class Kind {
+        TOPLEVEL,
+        TOOL,
+    };
+
+    enum class Cursor {
+        POINTER,
+        HAND
+    };
+
+    std::function<void()>               onClose;
+    std::function<void(bool)>           onFullScreen;
+    std::function<bool(MouseEvent)>     onMouseEvent;
+    std::function<bool(KeyboardEvent)>  onKeyboardEvent;
+    std::function<void(std::string)>    onEditingDone;
+    std::function<void(double)>         onScrollbarAdjusted;
+    std::function<void()>               onRender;
+
+    virtual ~Window() {}
+
+    virtual int GetIntegralScaleFactor() = 0;       // raster graphics and coordinate scale
+    virtual double GetFractionalScaleFactor() = 0;  // vector font scale relative to 96 dpi
+    virtual double GetPixelDensity() = 0;           // physical display dpi
+
+    virtual bool IsVisible() = 0;
+    virtual void SetVisible(bool visible) = 0;
+
+    virtual bool IsFullScreen() = 0;
+    virtual void SetFullScreen(bool fullScreen) = 0;
+
+    virtual void SetTitle(const std::string &title) = 0;
+    virtual bool SetTitleForFilename(const Path &filename) { return false; }
+
+    virtual void SetMenuBar(MenuBarRef menuBar) = 0;
+
+    virtual void GetContentSize(double *width, double *height) = 0;
+    virtual void SetMinContentSize(double width, double height) = 0;
+
+    virtual void FreezePosition(const std::string &key) = 0;
+    virtual void ThawPosition(const std::string &key) = 0;
+
+    virtual void SetCursor(Cursor cursor) = 0;
+    virtual void SetTooltip(const std::string &text) = 0;
+
+    virtual bool IsEditorVisible() = 0;
+    virtual void ShowEditor(double x, double y, double fontHeight, double minWidth,
+                            bool isMonospace, const std::string &text) = 0;
+    virtual void HideEditor() = 0;
+
+    virtual void SetScrollbarVisible(bool visible) = 0;
+    virtual void ConfigureScrollbar(double min, double max, double pageSize) = 0;
+    virtual double GetScrollbarPosition() = 0;
+    virtual void SetScrollbarPosition(double pos) = 0;
+
+    virtual void Invalidate() = 0;
+    virtual void Redraw() = 0;
+
+    virtual void *NativePtr() = 0;
+};
+
+typedef std::shared_ptr<Window> WindowRef;
 
 //-----------------------------------------------------------------------------
 // Factories
@@ -116,6 +208,14 @@ typedef std::shared_ptr<MenuBar> MenuBarRef;
 TimerRef CreateTimer();
 MenuRef CreateMenu();
 MenuBarRef GetOrCreateMainMenu(bool *unique);
+WindowRef CreateWindow(Window::Kind kind = Window::Kind::TOPLEVEL,
+                       WindowRef parentWindow = NULL);
+
+//-----------------------------------------------------------------------------
+// Application-wide APIs
+//-----------------------------------------------------------------------------
+
+void Exit();
 
 }
 

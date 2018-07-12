@@ -148,7 +148,7 @@ public:
         }
 
         SS.GenerateAll();
-        InvalidateGraphics();
+        SS.GW.Invalidate();
         SS.ScheduleShowTW();
     }
 };
@@ -225,7 +225,44 @@ void TextWindow::MakeColorTable(const Color *in, float *out) {
 }
 
 void TextWindow::Init() {
-    canvas = CreateRenderer();
+    if(!window) {
+        window = Platform::CreateWindow(Platform::Window::Kind::TOOL, SS.GW.window);
+        if(window) {
+            using namespace std::placeholders;
+            window->onClose = []() {
+                SS.GW.showTextWindow = false;
+                SS.GW.EnsureValidActives();
+            };
+            window->onMouseEvent = [this](Platform::MouseEvent event) {
+                using Platform::MouseEvent;
+
+                if(event.type == MouseEvent::Type::PRESS ||
+                   event.type == MouseEvent::Type::MOTION) {
+                    bool isClick  = (event.type == MouseEvent::Type::PRESS);
+                    bool leftDown = (event.button == MouseEvent::Button::LEFT);
+                    this->MouseEvent(isClick, leftDown, event.x, event.y);
+                    return true;
+                } else if(event.type == MouseEvent::Type::LEAVE) {
+                    MouseLeave();
+                    return true;
+                } else if(event.type == MouseEvent::Type::SCROLL_VERT) {
+                    window->SetScrollbarPosition(window->GetScrollbarPosition() -
+                                                 LINE_HEIGHT / 2 * event.scrollDelta);
+                }
+                return false;
+            };
+            window->onRender = std::bind(&TextWindow::Paint, this);
+            window->onEditingDone = std::bind(&TextWindow::EditControlDone, this, _1);
+            window->onScrollbarAdjusted = std::bind(&TextWindow::ScrollbarEvent, this, _1);
+
+            window->SetMinContentSize(420, 300);
+            window->SetVisible(true);
+        }
+    }
+
+    if(!canvas) {
+        canvas = CreateRenderer();
+    }
 
     ClearSuper();
 }
@@ -234,6 +271,7 @@ void TextWindow::ClearSuper() {
     HideEditControl();
 
     // Ugly hack, but not so ugly as the next line
+    Platform::WindowRef oldWindow = std::move(window);
     std::shared_ptr<ViewportCanvas> oldCanvas = canvas;
 
     // Cannot use *this = {} here because TextWindow instances
@@ -242,6 +280,7 @@ void TextWindow::ClearSuper() {
     memset(this, 0, sizeof(*this));
 
     // Return old canvas
+    window = std::move(oldWindow);
     canvas = oldCanvas;
 
     MakeColorTable(fgColors, fgColorTable);
@@ -253,7 +292,7 @@ void TextWindow::ClearSuper() {
 
 void TextWindow::HideEditControl() {
     editControl.colorPicker.show = false;
-    HideTextEditControl();
+    if(window) window->HideEditor();
 }
 
 void TextWindow::ShowEditControl(int col, const std::string &str, int halfRow) {
@@ -264,11 +303,13 @@ void TextWindow::ShowEditControl(int col, const std::string &str, int halfRow) {
     int x = LEFT_MARGIN + CHAR_WIDTH_*col;
     int y = (halfRow - SS.TW.scrollPos)*(LINE_HEIGHT/2);
 
-    ShowTextEditControl(x, y + 18, str);
+    double width, height;
+    window->GetContentSize(&width, &height);
+    window->ShowEditor(x, y + LINE_HEIGHT - 2, LINE_HEIGHT - 4,
+                       width - x, /*isMonospace=*/true, str);
 }
 
-void TextWindow::ShowEditControlWithColorPicker(int col, RgbaColor rgb)
-{
+void TextWindow::ShowEditControlWithColorPicker(int col, RgbaColor rgb) {
     SS.ScheduleShowTW();
 
     editControl.colorPicker.show = true;
@@ -518,21 +559,21 @@ void TextWindow::Show() {
         }
     }
 
-    InvalidateText();
+    if(window) window->Invalidate();
 }
 
 void TextWindow::DrawOrHitTestIcons(UiCanvas *uiCanvas, TextWindow::DrawOrHitHow how,
                                     double mx, double my)
 {
-    int width, height;
-    GetTextWindowSize(&width, &height);
+    double width, height;
+    window->GetContentSize(&width, &height);
 
     int x = 20, y = 33 + LINE_HEIGHT;
     y -= scrollPos*(LINE_HEIGHT/2);
 
     if(how == PAINT) {
         int top = y - 28, bot = y + 4;
-        uiCanvas->DrawRect(0, width, top, bot,
+        uiCanvas->DrawRect(0, (int)width, top, bot,
                            /*fillColor=*/{ 30, 30, 30, 255 }, /*outlineColor=*/{});
     }
 
@@ -546,9 +587,6 @@ void TextWindow::DrawOrHitTestIcons(UiCanvas *uiCanvas, TextWindow::DrawOrHitHow
             button->Draw(uiCanvas, x, y, (button == hoveredButton));
         } else if(mx > x - 2 && mx < x + 26 &&
                   my < y + 2 && my > y - 26) {
-            if(button != oldHovered) {
-                // FIXME(platorm/gui): implement native tooltips here
-            }
             hoveredButton = button;
             if(how == CLICK) {
                 button->Click();
@@ -559,7 +597,12 @@ void TextWindow::DrawOrHitTestIcons(UiCanvas *uiCanvas, TextWindow::DrawOrHitHow
     }
 
     if(how != PAINT && hoveredButton != oldHovered) {
-        InvalidateText();
+        if(hoveredButton == NULL) {
+            window->SetTooltip("");
+        } else {
+            window->SetTooltip(hoveredButton->Tooltip());
+        }
+        window->Invalidate();
     }
 }
 
@@ -629,12 +672,14 @@ std::shared_ptr<Pixmap> TextWindow::HsvPattern1d(double hue, double sat, int w, 
 
 void TextWindow::ColorPickerDone() {
     RgbaColor rgb = editControl.colorPicker.rgb;
-    EditControlDone(ssprintf("%.2f, %.2f, %.3f", rgb.redF(), rgb.greenF(), rgb.blueF()).c_str());
+    EditControlDone(ssprintf("%.2f, %.2f, %.3f", rgb.redF(), rgb.greenF(), rgb.blueF()));
 }
 
 bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, bool leftDown,
                                           double x, double y)
 {
+    using Platform::Window;
+
     bool mousePointerAsHand = false;
 
     if(how == HOVER && !leftDown) {
@@ -643,7 +688,7 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
     }
 
     if(!editControl.colorPicker.show) return false;
-    if(how == CLICK || (how == HOVER && leftDown)) InvalidateText();
+    if(how == CLICK || (how == HOVER && leftDown)) window->Invalidate();
 
     static const RgbaColor BaseColor[12] = {
         RGBi(255,   0,   0),
@@ -662,8 +707,8 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
         RGBi(  0, 127, 255),
     };
 
-    int width, height;
-    GetTextWindowSize(&width, &height);
+    double width, height;
+    window->GetContentSize(&width, &height);
 
     int px = LEFT_MARGIN + CHAR_WIDTH_*editControl.col;
     int py = (editControl.halfRow - SS.TW.scrollPos)*(LINE_HEIGHT/2);
@@ -673,7 +718,7 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
     static const int WIDTH = 16, HEIGHT = 12;
     static const int PITCH = 18, SIZE = 15;
 
-    px = min(px, width - (WIDTH*PITCH + 40));
+    px = min(px, (int)width - (WIDTH*PITCH + 40));
 
     int pxm = px + WIDTH*PITCH + 11,
         pym = py + HEIGHT*PITCH + 7;
@@ -818,22 +863,26 @@ bool TextWindow::DrawOrHitTestColorPicker(UiCanvas *uiCanvas, DrawOrHitHow how, 
         }
     }
 
-    SetMousePointerToHand(mousePointerAsHand);
+    window->SetCursor(mousePointerAsHand ?
+                      Window::Cursor::HAND :
+                      Window::Cursor::POINTER);
     return true;
 }
 
 void TextWindow::Paint() {
     if (!canvas) return;
 
-    int width, height;
-    GetTextWindowSize(&width, &height);
+    double width, height;
+    window->GetContentSize(&width, &height);
 
     Camera camera = {};
-    camera.width  = width;
-    camera.height = height;
+    camera.width      = width;
+    camera.height     = height;
+    camera.pixelRatio = window->GetIntegralScaleFactor();
+    camera.gridFit    = (window->GetIntegralScaleFactor() == 1);
     camera.LoadIdentity();
-    camera.offset.x = -(double)camera.width  / 2.0;
-    camera.offset.y = -(double)camera.height / 2.0;
+    camera.offset.x   = -camera.width  / 2.0;
+    camera.offset.y   = -camera.height / 2.0;
 
     Lighting lighting = {};
     lighting.backgroundColor = RGBi(0, 0, 0);
@@ -846,14 +895,20 @@ void TextWindow::Paint() {
     uiCanvas.canvas = canvas;
     uiCanvas.flip = true;
 
-    halfRows = camera.height / (LINE_HEIGHT/2);
+    halfRows = (int)camera.height / (LINE_HEIGHT/2);
 
     int bottom = top[rows-1] + 2;
     scrollPos = min(scrollPos, bottom - halfRows);
     scrollPos = max(scrollPos, 0);
 
     // Let's set up the scroll bar first
-    MoveTextScrollbarTo(scrollPos, top[rows - 1] + 1, halfRows);
+    if(top[rows - 1] + 1 > halfRows) {
+        window->ConfigureScrollbar(0, top[rows - 1] + 1, halfRows);
+        window->SetScrollbarPosition(scrollPos);
+        window->SetScrollbarVisible(true);
+    } else {
+        window->SetScrollbarVisible(false);
+    }
 
     // Now paint the window.
     int r, c, a;
@@ -863,7 +918,7 @@ void TextWindow::Paint() {
             if(ltop < (scrollPos-1)) continue;
             if(ltop > scrollPos+halfRows) break;
 
-            for(c = 0; c < min((width/CHAR_WIDTH_)+1, (int) MAX_COLS); c++) {
+            for(c = 0; c < min(((int)width/CHAR_WIDTH_)+1, (int) MAX_COLS); c++) {
                 int x = LEFT_MARGIN + c*CHAR_WIDTH_;
                 int y = (ltop-scrollPos)*(LINE_HEIGHT/2) + 4;
 
@@ -971,17 +1026,18 @@ void TextWindow::Paint() {
 }
 
 void TextWindow::MouseEvent(bool leftClick, bool leftDown, double x, double y) {
-    if(TextEditControlIsVisible() || GraphicsEditControlIsVisible()) {
-        if(DrawOrHitTestColorPicker(NULL, leftClick ? CLICK : HOVER, leftDown, x, y))
-        {
+    using Platform::Window;
+
+    if(SS.TW.window->IsEditorVisible() || SS.GW.window->IsEditorVisible()) {
+        if(DrawOrHitTestColorPicker(NULL, leftClick ? CLICK : HOVER, leftDown, x, y)) {
             return;
         }
 
         if(leftClick) {
             HideEditControl();
-            HideGraphicsEditControl();
+            SS.GW.window->HideEditor();
         } else {
-            SetMousePointerToHand(false);
+            window->SetCursor(Window::Cursor::POINTER);
         }
         return;
     }
@@ -1007,7 +1063,7 @@ void TextWindow::MouseEvent(bool leftClick, bool leftDown, double x, double y) {
         }
     }
     if(r >= 0 && c >= 0 && r < rows && c < MAX_COLS) {
-        SetMousePointerToHand(false);
+        window->SetCursor(Window::Cursor::POINTER);
 
         hoveredRow = r;
         hoveredCol = c;
@@ -1017,16 +1073,16 @@ void TextWindow::MouseEvent(bool leftClick, bool leftDown, double x, double y) {
             if(item.link && item.f) {
                 (item.f)(item.link, item.data);
                 Show();
-                InvalidateGraphics();
+                SS.GW.Invalidate();
             }
         } else {
             if(item.link) {
-                SetMousePointerToHand(true);
+                window->SetCursor(Window::Cursor::HAND);
                 if(item.h) {
                     (item.h)(item.link, item.data);
                 }
             } else {
-                SetMousePointerToHand(false);
+                window->SetCursor(Window::Cursor::POINTER);
             }
         }
     }
@@ -1035,8 +1091,8 @@ void TextWindow::MouseEvent(bool leftClick, bool leftDown, double x, double y) {
         prevHoveredRow != hoveredRow ||
         prevHoveredCol != hoveredCol)
     {
-        InvalidateGraphics();
-        InvalidateText();
+        SS.GW.Invalidate();
+        window->Invalidate();
     }
 }
 
@@ -1044,21 +1100,20 @@ void TextWindow::MouseLeave() {
     hoveredButton = NULL;
     hoveredRow = 0;
     hoveredCol = 0;
-    InvalidateText();
+    window->Invalidate();
 }
 
-void TextWindow::ScrollbarEvent(int newPos) {
-    if(TextEditControlIsVisible())
+void TextWindow::ScrollbarEvent(double newPos) {
+    if(window->IsEditorVisible())
         return;
 
     int bottom = top[rows-1] + 2;
-    newPos = min(newPos, bottom - halfRows);
-    newPos = max(newPos, 0);
+    newPos = min((int)newPos, bottom - halfRows);
+    newPos = max((int)newPos, 0);
 
     if(newPos != scrollPos) {
-        scrollPos = newPos;
-        MoveTextScrollbarTo(scrollPos, top[rows - 1] + 1, halfRows);
-        InvalidateText();
+        scrollPos = (int)newPos;
+        window->Invalidate();
     }
 }
 

@@ -938,15 +938,6 @@ std::vector<SolveSpace::Platform::Path> SolveSpace::GetFontFiles() {
 }
 @end
 
-void SolveSpace::SetMainMenu(Platform::MenuBarRef menuBar) {
-    SS.UpdateWindowTitle();
-    [TW setTitle:Wrap(C_("title", "Property Browser"))];
-}
-
-void SolveSpace::ExitNow() {
-    [NSApp stop:nil];
-}
-
 /*
  * Normally we would just link to the 3DconnexionClient framework.
  * We don't want to (are not allowed to) distribute the official

@@ -231,8 +231,5 @@ MenuBarRef GetOrCreateMainMenu(bool *unique) {
     return mainMenu;
 }
 
-void SetMainMenu(MenuBarRef menuBar) {
-}
-
 }
 }
