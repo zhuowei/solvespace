@@ -203,6 +203,7 @@ Platform::KeyboardEvent GraphicsWindow::AcceleratorForCommand(Command cmd) {
     }
 
     Platform::KeyboardEvent accel = {};
+    accel.type = Platform::KeyboardEvent::Type::PRESS;
     if(rawAccel & SHIFT_MASK) {
         accel.shiftDown = true;
     }
@@ -394,14 +395,13 @@ void GraphicsWindow::Init() {
     if(!window) {
         window = Platform::CreateWindow();
         if(window) {
-            canvas = CreateRenderer();
-            if(canvas) {
-                persistentCanvas = canvas->CreateBatch();
-                persistentDirty = true;
-            }
-
             using namespace std::placeholders;
             window->onClose = std::bind(&SolveSpaceUI::MenuFile, Command::EXIT);
+            window->onContextLost = [&] {
+                canvas = NULL;
+                persistentCanvas = NULL;
+                persistentDirty = true;
+            };
             window->onRender = std::bind(&GraphicsWindow::Paint, this);
             window->onKeyboardEvent = std::bind(&GraphicsWindow::KeyboardEvent, this, _1);
             window->onMouseEvent = std::bind(&GraphicsWindow::MouseEvent, this, _1);
@@ -409,6 +409,14 @@ void GraphicsWindow::Init() {
             window->onEditingDone = std::bind(&GraphicsWindow::EditControlDone, this, _1);
             window->SetMinContentSize(720, 670);
             PopulateMainMenu();
+        }
+    }
+
+    if(window) {
+        canvas = CreateRenderer();
+        if(canvas) {
+            persistentCanvas = canvas->CreateBatch();
+            persistentDirty = true;
         }
     }
 

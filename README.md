@@ -99,6 +99,35 @@ is built as `build/bin/solvespace-cli.exe`.
 
 Space Navigator support will not be available.
 
+## Building for web
+
+You will need [Emscripten][]. First, install and prepare `emsdk`:
+
+    git clone https://github.com/juj/emsdk.git
+    cd emsdk
+    ./emsdk install latest
+    ./emsdk update latest
+    source ./emsdk_env.sh
+    cd ..
+
+Before building, check out the project and the necessary submodules:
+
+    git clone https://github.com/solvespace/solvespace
+    cd solvespace
+    git submodule update
+
+After that, build SolveSpace as following:
+
+    mkdir build
+    cd build
+    cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/Toolchain-emscripten.cmake \
+             -DCMAKE_BUILD_TYPE=Release
+    make
+
+The graphical interface is built as `FIXME`. The command-line interface is not available.
+
+[emscripten]: https://kripken.github.io/emscripten-site/
+
 Building on macOS
 -----------------
 

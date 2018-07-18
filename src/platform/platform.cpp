@@ -499,6 +499,12 @@ static Platform::Path ResourcePath(const std::string &name) {
     return path;
 }
 
+#elif defined(EMSCRIPTEN)
+
+static Platform::Path ResourcePath(const std::string &name) {
+    return Path::From("res/" + name);
+}
+
 #elif !defined(WIN32)
 
 #    if defined(__linux__)
