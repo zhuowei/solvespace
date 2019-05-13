@@ -460,6 +460,11 @@ MenuBarRef GetOrCreateMainMenu(bool *unique) {
 }
 
 - (void)mouseMotionEvent:(NSEvent *)nsEvent {
+    static int d = 0;
+    int mynum = d++;
+    if (mynum & 0x3) {
+        return;
+    }
     using Platform::MouseEvent;
 
     MouseEvent event = [self convertMouseEvent:nsEvent];
